@@ -17,6 +17,14 @@ from sklearn.preprocessing import label_binarize
 import hipe4ml.tree_handler
 
 
+import torch
+from torch import nn
+from torchmetrics.functional import accuracy
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
+import pytorch_lightning as pl
+
+
 def _plot_output(df_train, df_test, lims, bins, label, color, kwds):
     """
     Utility function for plot_output_train_test
@@ -38,6 +46,23 @@ def _plot_output(df_train, df_test, lims, bins, label, color, kwds):
     plt.errorbar(center, hist, yerr=err, fmt='o',
                  c=color, label=f'{label} pdf Test Set')
 
+class VariablesDataset(Dataset):
+    def __init__(self, features, labels=None):
+
+        if labels is None:
+            labels=np.zeros(len(features))  
+        self.Features=torch.from_numpy(features.values).float()
+        self.Labels=torch.from_numpy(labels)
+
+    def __len__(self):
+        return len(self.Labels)
+
+    def __getitem__(self, idx):
+        
+        x = self.Features[idx]
+        y = self.Labels[idx]
+
+        return x,y
 
 def plot_output_train_test(model, data, bins=80, output_margin=True, labels=None, logscale=False, **kwds):
     """
@@ -83,6 +108,12 @@ def plot_output_train_test(model, data, bins=80, output_margin=True, labels=None
     out: matplotlib.figure.Figure or list of them
         Model output distributions for each class
     """
+
+
+    #=============================================================
+    #   Old (not for nn)
+    #============================================================
+    '''
     class_labels = np.unique(data[1])
     n_classes = len(class_labels)
 
@@ -132,6 +163,63 @@ def plot_output_train_test(model, data, bins=80, output_margin=True, labels=None
             plt.legend(frameon=False, fontsize=12, loc='best')
 
     return res
+    '''
+
+
+    class_labels = np.unique(data[1])
+    n_classes = len(class_labels)
+
+    prediction = []
+    for xxx, yyy in ((data[0], data[1]), (data[2], data[3])):
+        for class_lab in class_labels:
+            xxxdataset=VariablesDataset(xxx[yyy == class_lab][model.training_columns])
+            prediction.append(model.predict(
+                xxxdataset, output_margin))
+
+    low = min(np.min(d) for d in prediction)
+    high = max(np.max(d) for d in prediction)
+    low_high = (low, high)
+
+    # only one figure in case of binary classification
+    if n_classes <= 2:
+        res = plt.figure()
+        labels = ['Signal', 'Background'] if labels is None else labels
+        colors = ['b', 'r']
+        for i_class, (label, color) in enumerate(zip(labels, colors)):
+            _plot_output(
+                prediction[i_class], prediction[i_class+2], low_high, bins, label, color, kwds)
+        if logscale:
+            plt.yscale('log')
+        plt.xlabel('BDT output', fontsize=13, ha='right', position=(1, 20))
+        plt.ylabel('Counts (arb. units)', fontsize=13,
+                   horizontalalignment='left')
+        plt.legend(frameon=False, fontsize=12, loc='best')
+
+    # n figures in case of multi-classification with n classes
+    else:
+        res = []
+        labels = [
+            f'class{class_lab}' for class_lab in class_labels] if labels is None else labels
+        cmap = plt.cm.get_cmap('tab10')
+        colors = [cmap(i_class) for i_class in range(len(labels))]
+        for output, out_label in zip(class_labels, labels):
+            res.append(plt.figure())
+            for i_class, (label, color) in enumerate(zip(labels, colors)):
+                _plot_output(prediction[i_class][:, output], prediction[i_class+n_classes][:, output], low_high, bins,
+                             label, color, kwds)
+            if logscale:
+                plt.yscale('log')
+            plt.xlabel(f'BDT output for {out_label}',
+                       fontsize=13, ha='right', position=(1, 20))
+            plt.ylabel('Counts (arb. units)', fontsize=13,
+                       horizontalalignment='left')
+            plt.legend(frameon=False, fontsize=12, loc='best')
+
+    return res
+
+
+
+
 
 # flake8: noqa: C901
 def plot_distr(data_list, column=None, bins=50, labels=None, colors=None, **kwds):  # pylint: disable=too-many-branches
@@ -188,7 +276,7 @@ def plot_distr(data_list, column=None, bins=50, labels=None, colors=None, **kwds
 
     else:
         column = list(list_of_df[0].columns)
-
+    
     if labels is None:
         labels = [f'class{i_class}' for i_class, _ in enumerate(list_of_df)]
 
@@ -202,8 +290,10 @@ def plot_distr(data_list, column=None, bins=50, labels=None, colors=None, **kwds
             axes = axes[:len(column)]
         else:
             dfm.hist(ax=axes, column=column, bins=bins, label=lab, color=col, **kwds)
-    for axs in axes:
-        axs.set_ylabel('Counts')
+
+    for idx, axs in enumerate(axes):
+        axs.set_ylabel('Counts',size=11)
+
     axes[-1].legend(loc='best')
     if len(axes) == 1:
         axes = axes[0]
