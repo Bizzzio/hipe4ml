@@ -487,9 +487,6 @@ class ModelHandler:
             self._n_classes = loaded_model.get_n_classes()
             self._task_type = loaded_model.get_task_type()
 
-
-class ModelHandlerNN (ModelHandler):
-
     '''
     get_model_params:       fatto           #TODO: togliere i fatto
     set_model_params:       fatto
@@ -509,9 +506,34 @@ class ModelHandlerNN (ModelHandler):
     '''
 
 
-    def __init__(self, input_model=None, training_columns=None, model_params=None, task_type='classification'):
+class ModelHandlerNN (ModelHandler):
+
+    """
+    Class used for wrapping the models from different Neural Networks 
+    libraries to build a new model with common methods. Currently only 
+    Pytorch Lightning is supported.
+
+    Parameters
+    -------------------------------------------------
+    input_model: Pytorch model
+    training_columns: list
+        Contains the name of the features used for the training.
+        Example: ['dEdx', 'pT', 'ct']
+
+    model_params: dict
+        Model hyper-parameter values. 
+
+    task_type: str
+        Task type of the model: 'classification' or 'regression'
+        (currently only classification is supported)
+    """
+
+
+
+
+    def __init__(self, input_model=None, training_columns=None, model_params=None, task_type='classification',**kwargs):
         self.model = input_model
-        self.trainer = pl.Trainer(max_epochs=10, accelerator='gpu', devices=1)         #TODO: generalizzare
+        self.trainer = pl.Trainer(**kwargs)
         self.training_columns = training_columns
         self.model_params = model_params
         self._n_classes = None
@@ -521,7 +543,7 @@ class ModelHandlerNN (ModelHandler):
                 "Task type must be 'classification'")
 
         
-        '''                                     #TODO: capire cosa fare qua
+        '''                                                         #TODO: capire cosa fare qua
             if self.model is not None:
             self.model_string = inspect.getmodule(
                 self.model).__name__.partition('.')[0]
@@ -544,7 +566,8 @@ class ModelHandlerNN (ModelHandler):
         Parameters
         ---------------------------
         train_dataset: dataset containing training and target data,
-            needs to have Labels and Features attributes
+            needs to have Labels and Features attributes containing
+            labels and features array
 
         **kwargs:
             Extra kwargs passed on to model.fit() method
@@ -565,10 +588,10 @@ class ModelHandlerNN (ModelHandler):
         Return model prediction for the array x_test
         Parameters
         --------------------------------------
-        x_test: hipe4ml tree_handler, array-like, sparse matrix
+        test_dataset: pytorch dataset
             The input sample.
 
-        output_margin: bool
+        output_margin: bool                 #TODO: è da usare?
             Whether to output the raw untransformed margin value. If False model
             probabilities are returned. Not used when task_type is 'regression'.
 
@@ -623,16 +646,16 @@ class ModelHandlerNN (ModelHandler):
 
         Parameters
         ----------------------------------------------
-        data: list
-            Contains respectively: training
-            set dataframe, training label array,
-            test set dataframe, test label array
+        train dataset: pytorch dataset
+            The training dataset.
+        test_dataset: pytorch dataset
+            The test dataset.
 
         return_prediction: bool
             If True Model predictions on the test set are
             returned
 
-        output_margin: bool
+        output_margin: bool                                 #TODO: lo dobbiamo usare?
             Whether to output the raw untransformed margin value. If False model
             probabilities are returned. Not used when task_type is 'regression'.
 
@@ -692,10 +715,8 @@ class ModelHandlerNN (ModelHandler):
 
         Parameters
         ------------------------------------------------------
-        data: list
-            Contains respectively: training
-            set dataframe, training label array,
-            test set dataframe, test label array
+        train_dataset: pytorch dataset
+            Contains training set and training labels
 
         hyperparams_ranges: dict
             Hyperparameter ranges (in tuples or list). If a parameter is not
@@ -703,13 +724,12 @@ class ModelHandlerNN (ModelHandler):
             Important: the type of the params must be preserved
             when passing the ranges.
             For example:
-            dict={
-                'max_depth':(10,100)
-                'learning_rate': (0.01,0.03)
-                'n_jobs': 8
-            }
+            dict=   {'n_layers': !!python/tuple [2, 4], 
+                    'n_units': [!!python/tuple [10, 200],!!python/tuple [10, 200],!!python/tuple [10, 200],!!python/tuple [10, 200]],
+                    'learning_rate': !!python/tuple [0.01, 1.]}
+            
 
-        cross_val_scoring: string, callable or None
+        cross_val_scoring: string, callable or None             #TODO: Dovremmo usarlo in qualche modo?
             Score metrics used for the cross-validation.
             A string (see sklearn model evaluation documentation:
             https://scikit-learn.org/stable/modules/model_evaluation.html)
