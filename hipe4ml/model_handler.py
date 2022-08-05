@@ -297,7 +297,7 @@ class ModelHandler:
         print('Training the model: Done!')
         print('Testing the model: ...')
         y_pred = self.predict(data[2], output_margin=output_margin)
-        if self._task_type == 'classification':
+        if self._task_type == 'classification':        
             roc_score = roc_auc_score(
                 data[3], y_pred, average=average, multi_class=multi_class_opt)
             print(f'ROC_AUC_score: {roc_score:.6f}')
@@ -591,7 +591,7 @@ class ModelHandlerNN (ModelHandler):
         test_dataset: pytorch dataset
             The input sample.
 
-        output_margin: bool                 #TODO: è da usare?
+        output_margin: bool             
             Whether to output the raw untransformed margin value. If False model
             probabilities are returned. Not used when task_type is 'regression'.
 
@@ -629,12 +629,17 @@ class ModelHandlerNN (ModelHandler):
         dataloader = DataLoader(test_dataset, batch_size=len(test_dataset), num_workers=6)
         pred = self.trainer.predict(self.model,dataloader, **kwargs)
 
+        if not output_margin:
+            sftmax=nn.Softmax(dim=1)
+            pred=[sftmax(pred[0])]
         # in case of binary classification return only the scores of
         # the signal class
-        if pred[0].size(dim=1) <= 2:
+        if pred[0].size(dim=1) <= 2:    
             pred=pred[0].tolist()
             Pred=[row[1] for row in pred]
-        return Pred
+            return Pred
+        else:
+            return pred
 
 
 
@@ -655,7 +660,7 @@ class ModelHandlerNN (ModelHandler):
             If True Model predictions on the test set are
             returned
 
-        output_margin: bool                                 #TODO: lo dobbiamo usare?
+        output_margin: bool                                
             Whether to output the raw untransformed margin value. If False model
             probabilities are returned. Not used when task_type is 'regression'.
 
@@ -693,9 +698,14 @@ class ModelHandlerNN (ModelHandler):
         print('Training the model: Done!')
         print('Testing the model: ...')
         y_pred = self.predict(test_dataset, output_margin=output_margin)
+
         if self._task_type == 'classification':
-            roc_score = roc_auc_score(
-                test_dataset.Labels, y_pred, average=average, multi_class=multi_class_opt)
+            if n_classes<=2:
+                roc_score = roc_auc_score(
+                    test_dataset.Labels, y_pred, average=average, multi_class=multi_class_opt)
+            else:
+                roc_score = roc_auc_score(
+                    test_dataset.Labels, y_pred[0].detach().cpu().numpy(), average=average, multi_class=multi_class_opt)
             print(f'ROC_AUC_score: {roc_score:.6f}')
         else:
             mse_score = mean_squared_error(test_dataset.Labels, y_pred)
@@ -805,7 +815,7 @@ class ModelHandlerNN (ModelHandler):
             dataloader = DataLoader(train_data, batch_size=100, num_workers=8)
             val_dataloader = DataLoader(val_dataset, batch_size=100, num_workers=8)
 
-            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor="acc")],accelerator='gpu', devices=1)
+            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor="acc")])#,accelerator='gpu', devices=1)
             trainer.fit(model_copy, dataloader, val_dataloader)
             trainer.logger.log_hyperparams(params)
             print(trainer.callback_metrics)

@@ -173,8 +173,12 @@ def plot_output_train_test(model, data, bins=80, output_margin=True, labels=None
     for xxx, yyy in ((data[0], data[1]), (data[2], data[3])):
         for class_lab in class_labels:
             xxxdataset=VariablesDataset(xxx[yyy == class_lab][model.training_columns])
-            prediction.append(model.predict(
-                xxxdataset, output_margin))
+            if n_classes<=2:
+                prediction.append(model.predict(
+                    xxxdataset, output_margin))
+            else:
+                prediction.append(model.predict(
+                    xxxdataset, output_margin)[0].detach().cpu().numpy())
 
     low = min(np.min(d) for d in prediction)
     high = max(np.max(d) for d in prediction)
