@@ -287,7 +287,7 @@ class ModelHandler:
         n_classes = len(np.unique(data[1]))
         self._n_classes = n_classes
         print('==============================')
-        print(f"Training {self.model_string} model for {self._task_type}")
+        #print(f"Training {self.model_string} model for {self._task_type}")
         if self._task_type == 'classification':
             print('Number of detected classes:', n_classes)
 
@@ -488,23 +488,39 @@ class ModelHandler:
             self._task_type = loaded_model.get_task_type()
 
     '''
-    get_model_params:       fatto           #TODO: togliere i fatto
-    set_model_params:       fatto
-    set_training_columns:   fatto
-    get_training_columns:   fatto
-    get_original_model:     
-    get_model_module:
+    get_model_params:       fatto (ereditato)           #TODO: togliere i fatto
+    set_model_params:       fatto (ereditato)
+    set_training_columns:   fatto (ereditato)
+    get_training_columns:   fatto (ereditato)
+    get_original_model:     fatto (ereditato)
+    get_model_module:       fatto (ereditato)
     get_n_classes:          fatto (ereditato)
-    get_task_type:
+    get_task_type:          fatto (ereditato)
     fit:                    fatto
     predict:                fatto
-    train_test_model:       fatto
+    train_test_model:       fatto (ereditato)
     optimize_params_optuna: fatto
-    dump_original_model:    fatto (ereditato)
-    dump_model_handler:     fatto (ereditato)
-    load_model_handler:     fatto (ereditato)
+    dump_original_model:    
+    dump_model_handler:     
+    load_model_handler:     
     '''
+class VariablesDataset(Dataset):
+        def __init__(self, features, labels=None):
 
+            if labels is None:
+                labels=np.zeros(len(features))  
+            self.Features=torch.from_numpy(features.values).float()
+            self.Labels=torch.from_numpy(labels)
+
+        def __len__(self):
+            return len(self.Labels)
+
+        def __getitem__(self, idx):
+            
+            x = self.Features[idx]
+            y = self.Labels[idx]
+
+            return x,y  
 
 class ModelHandlerNN (ModelHandler):
 
@@ -538,13 +554,13 @@ class ModelHandlerNN (ModelHandler):
         self.model_params = model_params
         self._n_classes = None
         self._task_type = task_type
-        if self._task_type is not 'classification':
+        if self._task_type not in ['classification', 'regression']:
             raise ValueError(
-                "Task type must be 'classification'")
+                "Task type must be either 'classification' or 'regression'")
 
         
-        '''                                                         #TODO: capire cosa fare qua
-            if self.model is not None:
+                                                                 #TODO: capire cosa fare qua
+        '''if self.model is not None:
             self.model_string = inspect.getmodule(
                 self.model).__name__.partition('.')[0]
 
@@ -556,22 +572,26 @@ class ModelHandlerNN (ModelHandler):
             if self.model_params is None:
                 self.model_params = self.model.get_params()
             else:
-                self.model.set_params(**self.model_params)
-            '''
+                self.model.set_params(**self.model_params)'''
+              
 
-    def fit(self, train_dataset, **kwargs):
+
+    def fit(self, x_train, y_train, **kwargs):
         """
         Fit Model
 
         Parameters
         ---------------------------
-        train_dataset: dataset containing training and target data,
-            needs to have Labels and Features attributes containing
-            labels and features array
+        x_train: array-like, sparse matrix
+            Training data
+
+        y_train: array-like, sparse matrix
+            Target data
 
         **kwargs:
             Extra kwargs passed on to model.fit() method
         """
+        train_dataset=VariablesDataset(x_train[self.training_columns], y_train)
 
         if self._task_type == 'classification':
             n_classes = len(np.unique(train_dataset.Features))
@@ -579,16 +599,16 @@ class ModelHandlerNN (ModelHandler):
         if self.training_columns is None:
             self.training_columns = list(train_dataset.Labels.columns)
 
-        dataloader = DataLoader(train_dataset, batch_size=100, num_workers=8)   #TODO: generalizzare
-        self.trainer.fit(self.model, dataloader, **kwargs)
+        dataloader = DataLoader(train_dataset,**kwargs)   #TODO: generalizzare
+        self.trainer.fit(self.model, dataloader)
 
 
-    def predict(self, test_dataset, output_margin=True, **kwargs):
+    def predict(self, x_test, output_margin=True, **kwargs):
         """
         Return model prediction for the array x_test
         Parameters
         --------------------------------------
-        test_dataset: pytorch dataset
+        x_test: array-like, sparse matrix
             The input sample.
 
         output_margin: bool             
@@ -625,8 +645,9 @@ class ModelHandlerNN (ModelHandler):
                         "This Model does not support a decision_function(): use output_margin=False")
                 return self.model.decision_function(x_test, **kwargs).ravel()
         '''
+        test_dataset=VariablesDataset(x_test[self.training_columns])
 
-        dataloader = DataLoader(test_dataset, batch_size=len(test_dataset), num_workers=6)
+        dataloader = DataLoader(test_dataset, batch_size=len(test_dataset), num_workers=0)
         pred = self.trainer.predict(self.model,dataloader, **kwargs)
 
         if not output_margin:
@@ -639,84 +660,10 @@ class ModelHandlerNN (ModelHandler):
             Pred=[row[1] for row in pred]
             return Pred
         else:
-            return pred
+            return pred[0].detach().cpu().numpy()
 
 
-
-    def train_test_model(self, train_dataset, test_dataset, return_prediction=False, output_margin=False, average='macro',
-                         multi_class_opt='raise', **kwargs):
-        """
-        Perform the training and the testing of the model. The model performance is estimated
-        using the ROC AUC metric for classification and the MSE for regression.
-
-        Parameters
-        ----------------------------------------------
-        train dataset: pytorch dataset
-            The training dataset.
-        test_dataset: pytorch dataset
-            The test dataset.
-
-        return_prediction: bool
-            If True Model predictions on the test set are
-            returned
-
-        output_margin: bool                                
-            Whether to output the raw untransformed margin value. If False model
-            probabilities are returned. Not used when task_type is 'regression'.
-
-        average: string
-            Option for the average of ROC AUC scores used only in case of multi-classification.
-            You can choose between 'macro' and 'weighted'. For more information see
-            https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_auc_score.html#sklearn.metrics.roc_auc_score
-
-        multi_class_opt: string
-            Option to compute ROC AUC scores used only in case of multi-classification.
-            The one-vs-one 'ovo' and one-vs-rest 'ovr' approaches are available
-
-        **kwargs: dict
-            Extra kwargs passed on to the model fit method
-
-        Returns
-        ---------------------------------------
-        out: numpy array or None
-            If return_prediction==True, Model predictions on the test set are
-            returned
-
-        """
-
-        # get number of classes
-        n_classes = len(np.unique(train_dataset.Labels))
-        self._n_classes = n_classes
-        print('==============================')
-        #print(f"Training {self.model_string} model for {self._task_type}") #TODO: capire cosa fare qua
-        if self._task_type == 'classification':
-            print('Number of detected classes:', n_classes)
-
-        # final training with the optimized hyperparams
-        print('Training the model: ...')
-        self.fit(train_dataset, **kwargs)
-        print('Training the model: Done!')
-        print('Testing the model: ...')
-        y_pred = self.predict(test_dataset, output_margin=output_margin)
-
-        if self._task_type == 'classification':
-            if n_classes<=2:
-                roc_score = roc_auc_score(
-                    test_dataset.Labels, y_pred, average=average, multi_class=multi_class_opt)
-            else:
-                roc_score = roc_auc_score(
-                    test_dataset.Labels, y_pred[0].detach().cpu().numpy(), average=average, multi_class=multi_class_opt)
-            print(f'ROC_AUC_score: {roc_score:.6f}')
-        else:
-            mse_score = mean_squared_error(test_dataset.Labels, y_pred)
-            print(f'Mean squared error: {mse_score:.6f}')
-        print('Testing the model: Done!')
-        print('==============================')
-        if return_prediction:
-            return y_pred
-        return None
-
-    def optimize_params_optuna(self, train_dataset, hyperparams_ranges, cross_val_scoring='', nfold=5, direction='maximize',
+    def optimize_params_optuna(self, data, hyperparams_ranges, cross_val_scoring='', nfold=5, direction='maximize',
                                optuna_sampler=None, resume_study=None, save_study=None, **kwargs):
         """
         Perform hyperparameter optimization of ModelHandler using the Optuna module.
@@ -725,8 +672,10 @@ class ModelHandlerNN (ModelHandler):
 
         Parameters
         ------------------------------------------------------
-        train_dataset: pytorch dataset
-            Contains training set and training labels
+        data: list
+            Contains respectively: training
+            set dataframe, training label array,
+            test set dataframe, test label array
 
         hyperparams_ranges: dict
             Hyperparameter ranges (in tuples or list). If a parameter is not
@@ -782,10 +731,12 @@ class ModelHandlerNN (ModelHandler):
             https://optuna.readthedocs.io/en/stable/reference/generated/optuna.study.Study.html#optuna.study.Study
         """
 
-        n_classes = len(np.unique(train_dataset.Labels))
+        n_classes = len(np.unique(data[1]))
         self._n_classes = n_classes
         if self.training_columns is None:
-            self.training_columns = list(train_dataset.Features.columns)
+            self.training_columns = list(data[0].columns)
+
+        x_train, y_train, _, _ = data
 
         def __get_int_or_uniform(hyperparams_ranges, trial):
 
@@ -809,13 +760,13 @@ class ModelHandlerNN (ModelHandler):
             model_copy = deepcopy(self.model)
             model_copy.set_params(**{**self.model_params, **params})
             
-            
+            train_dataset=VariablesDataset(x_train[self.training_columns], y_train)
             
             train_data, val_dataset = random_split(train_dataset, [int(len(train_dataset.Labels)*4/5),  len(train_dataset.Labels)-int(len(train_dataset.Labels)*4/5)], generator=torch.Generator().manual_seed(42))
-            dataloader = DataLoader(train_data, batch_size=100, num_workers=8)
-            val_dataloader = DataLoader(val_dataset, batch_size=100, num_workers=8)
+            dataloader = DataLoader(train_data, batch_size=100, num_workers=0)
+            val_dataloader = DataLoader(val_dataset, batch_size=100, num_workers=0)
 
-            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor="acc")])#,accelerator='gpu', devices=1)
+            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor="acc")],accelerator='gpu', devices=1)
             trainer.fit(model_copy, dataloader, val_dataloader)
             trainer.logger.log_hyperparams(params)
             print(trainer.callback_metrics)
