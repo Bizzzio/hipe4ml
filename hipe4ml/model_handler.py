@@ -18,8 +18,10 @@ import hipe4ml.tree_handler
 import torch
 from torch import nn
 from torchmetrics.functional import accuracy
+from torchmetrics import AUROC 
 from torch.utils.data import DataLoader, random_split
 from torch.utils.data import Dataset
+from pytorch_lightning.callbacks import Callback
 import pytorch_lightning as pl
 
 
@@ -500,9 +502,9 @@ class ModelHandler:
     predict:                fatto
     train_test_model:       fatto (ereditato)
     optimize_params_optuna: fatto
-    dump_original_model:    
-    dump_model_handler:     
-    load_model_handler:     
+    dump_original_model:    fatto (ereditato)
+    dump_model_handler:     fatto (ereditato)
+    load_model_handler:     fatto (ereditato)
     '''
 class VariablesDataset(Dataset):
         def __init__(self, features, labels=None):
@@ -559,20 +561,20 @@ class ModelHandlerNN (ModelHandler):
                 "Task type must be either 'classification' or 'regression'")
 
         
-                                                                 #TODO: capire cosa fare qua
-        '''if self.model is not None:
-            self.model_string = inspect.getmodule(
-                self.model).__name__.partition('.')[0]
+        if self.model is not None:
+            self.model_string = inspect.getmro(
+                self.model.__class__)[1].__name__
+            print(self.model_string)
 
-            if self.model_string not in ["pytorch"]:
+            if self.model_string not in ["LightningModule"]:
                 raise ValueError(
-                    "Model must be 'pytorch'")
+                    "Model must be 'LightningModule'")
 
 
             if self.model_params is None:
                 self.model_params = self.model.get_params()
             else:
-                self.model.set_params(**self.model_params)'''
+                self.model.set_params(**self.model_params)
               
 
 
@@ -629,22 +631,6 @@ class ModelHandlerNN (ModelHandler):
             Model predictions
             """
         
-        '''                                                 #TODO: capire cosa fare qua
-        if isinstance(x_test, hipe4ml.tree_handler.TreeHandler):
-            x_test = x_test.get_data_frame()
-
-        x_test = x_test[self.training_columns]
-        if output_margin:
-            if self.model_string == 'xgboost':
-                return self.model.predict(x_test, output_margin=True, **kwargs)
-            if self.model_string == 'lightgbm':
-                return self.model.predict(x_test, raw_score=True, **kwargs)
-            if self.model_string == 'sklearn':
-                if not hasattr(self.model, 'decision_function'):
-                    raise ValueError(
-                        "This Model does not support a decision_function(): use output_margin=False")
-                return self.model.decision_function(x_test, **kwargs).ravel()
-        '''
         test_dataset=VariablesDataset(x_test[self.training_columns])
 
         dataloader = DataLoader(test_dataset, batch_size=len(test_dataset), num_workers=0)
@@ -663,7 +649,7 @@ class ModelHandlerNN (ModelHandler):
             return pred[0].detach().cpu().numpy()
 
 
-    def optimize_params_optuna(self, data, hyperparams_ranges, cross_val_scoring='', nfold=5, direction='maximize',
+    def optimize_params_optuna(self, data, hyperparams_ranges, metric='metric', direction='maximize',
                                optuna_sampler=None, resume_study=None, save_study=None, **kwargs):
         """
         Perform hyperparameter optimization of ModelHandler using the Optuna module.
@@ -687,19 +673,6 @@ class ModelHandlerNN (ModelHandler):
                     'n_units': [!!python/tuple [10, 200],!!python/tuple [10, 200],!!python/tuple [10, 200],!!python/tuple [10, 200]],
                     'learning_rate': !!python/tuple [0.01, 1.]}
             
-
-        cross_val_scoring: string, callable or None             #TODO: Dovremmo usarlo in qualche modo?
-            Score metrics used for the cross-validation.
-            A string (see sklearn model evaluation documentation:
-            https://scikit-learn.org/stable/modules/model_evaluation.html)
-            or a scorer callable object / function with signature scorer(estimator, X, y)
-            which should return only a single value.
-            In binary classification 'roc_auc' is suggested.
-            In multi-classification one between ‘roc_auc_ovr’, ‘roc_auc_ovo’,
-            ‘roc_auc_ovr_weighted’ and ‘roc_auc_ovo_weighted’ is suggested.
-            For more information see
-            https://scikit-learn.org/stable/modules/model_evaluation.html#scoring-parameter
-
         direction: str
             The direction of optimization. Either 'maximize' or 'minimize'.
             (e.g. for the metric 'roc_auc' the direction is 'maximize')
@@ -709,8 +682,6 @@ class ModelHandlerNN (ModelHandler):
             If None, default TPESampler is used. For more information see:
             https://optuna.readthedocs.io/en/stable/reference/samplers.html
 
-        nfold: int
-            Number of folds to calculate the cross validation error
 
         resume_study: str
             A string indicating the filename of the study to be resumed.
@@ -765,13 +736,13 @@ class ModelHandlerNN (ModelHandler):
             train_data, val_dataset = random_split(train_dataset, [int(len(train_dataset.Labels)*4/5),  len(train_dataset.Labels)-int(len(train_dataset.Labels)*4/5)], generator=torch.Generator().manual_seed(42))
             dataloader = DataLoader(train_data, batch_size=100, num_workers=0)
             val_dataloader = DataLoader(val_dataset, batch_size=100, num_workers=0)
-
-            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor="acc")],accelerator='gpu', devices=1)
+            
+            trainer = pl.Trainer(max_epochs=7,logger=True,callbacks=[PyTorchLightningPruningCallback(trial, monitor=metric)],accelerator='gpu', devices=1)
+            
             trainer.fit(model_copy, dataloader, val_dataloader)
             trainer.logger.log_hyperparams(params)
-            print(trainer.callback_metrics)
-            return trainer.callback_metrics["acc"].item()
-
+            print(trainer.callback_metrics[metric])
+            return trainer.callback_metrics[metric].item()
             
         if resume_study:
             with open(resume_study, 'rb') as resume_study_file:
